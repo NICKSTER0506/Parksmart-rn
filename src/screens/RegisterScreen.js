@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, StatusBar, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, StatusBar, ActivityIndicator } from 'react-native';
 import { colors } from '../constants/theme';
 import { register } from '../services/auth';
+import { showAlert } from '../utils/alert';
 
 export default function RegisterScreen({ navigation }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
 
   const handleRegister = async () => {
     if (!name || !email || !password) {
-      Alert.alert('Incomplete form', 'Please fill in all fields to continue.');
+      showAlert('Incomplete form', 'Please fill in all fields to continue.');
       return;
     }
 
@@ -20,7 +22,7 @@ export default function RegisterScreen({ navigation }) {
       await register(email.trim(), password.trim(), name.trim());
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (error) {
-      Alert.alert('Registration failed', error.message);
+      showAlert('Registration failed', error.message);
     } finally {
       setLoading(false);
     }
@@ -37,7 +39,9 @@ export default function RegisterScreen({ navigation }) {
           placeholder="Full Name"
           value={name}
           onChangeText={setName}
-          style={styles.input}
+          onFocus={() => setFocusedField('name')}
+          onBlur={() => setFocusedField(null)}
+          style={[styles.input, focusedField === 'name' && styles.inputFocused]}
         />
         <TextInput
           placeholder="Email"
@@ -45,14 +49,18 @@ export default function RegisterScreen({ navigation }) {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
-          style={styles.input}
+          onFocus={() => setFocusedField('email')}
+          onBlur={() => setFocusedField(null)}
+          style={[styles.input, focusedField === 'email' && styles.inputFocused]}
         />
         <TextInput
           placeholder="Password"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          style={styles.input}
+          onFocus={() => setFocusedField('password')}
+          onBlur={() => setFocusedField(null)}
+          style={[styles.input, focusedField === 'password' && styles.inputFocused]}
         />
 
         <Pressable style={styles.primaryButton} onPress={handleRegister} disabled={loading}>
@@ -106,6 +114,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     backgroundColor: colors.overlay,
     color: colors.text,
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+    backgroundColor: '#fff',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
   },
   primaryButton: {
     backgroundColor: colors.primary,

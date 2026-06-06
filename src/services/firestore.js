@@ -14,6 +14,9 @@ import {
   orderBy,
   onSnapshot,
   serverTimestamp,
+  limit,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 
 const usersCollection = collection(db, 'users');
@@ -38,10 +41,21 @@ export async function getUserById(uid) {
   return snapshot.exists() ? { uid: snapshot.id, ...snapshot.data() } : null;
 }
 
+export async function toggleFavorite(userId, complexId, isFavorite) {
+  const userRef = doc(usersCollection, userId);
+  return await updateDoc(userRef, {
+    favorites: isFavorite ? arrayRemove(complexId) : arrayUnion(complexId)
+  });
+}
+
 export async function getParkingSpots() {
-  const q = query(slotsCollection, orderBy('createdAt', 'asc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+  const snapshot = await getDocs(slotsCollection);
+  const slots = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+  return slots.sort((a, b) => {
+    const aTime = a.createdAt?.seconds || 0;
+    const bTime = b.createdAt?.seconds || 0;
+    return aTime - bTime;
+  });
 }
 
 export async function createSlot(slot) {
@@ -166,8 +180,29 @@ export function subscribeToSlotsRealtime(callback) {
 }
 
 export function subscribeToBookingsRealtime(callback) {
-  const q = query(bookingsCollection, orderBy('createdAt', 'desc'));
-  return onSnapshot(q, (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))));
+  const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(50));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach((doc) => {
+      list.push({ id: doc.id, ...doc.data() });
+    });
+    callback(list);
+  });
+}
+
+// Subscribe to Complexes Collection
+export function subscribeToComplexesRealtime(callback) {
+  const q = query(collection(db, 'complexes'), orderBy('name', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach((doc) => {
+      list.push({ id: doc.id, ...doc.data() });
+    });
+    callback(list);
+  }, (error) => {
+    console.error('Error fetching complexes:', error);
+    callback([]);
+  });
 }
 
 export function subscribeToUsersRealtime(callback) {

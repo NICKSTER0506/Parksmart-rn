@@ -1,25 +1,27 @@
-// Firebase configuration and initialization
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { initializeAuth, getAuth, getReactNativePersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-
-// TODO: Replace with your Firebase project config from Firebase Console
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyApghayratL-5r8MQ7QJ_ZMr6UrrfjJRnE",
-  authDomain: "smartpark-f6a3b.firebaseapp.com",
-  projectId: "smartpark-f6a3b",
-  storageBucket: "smartpark-f6a3b.firebasestorage.app",
-  messagingSenderId: "812817307856",
-  appId: "1:812817307856:web:1299a6f344bc0e51dee6d5"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID
 };
 
-
-
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+export const auth = Platform.OS === 'web'
+  ? getAuth(app)
+  : initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage)
+    });
+
 export const db = getFirestore(app);
 
 export default app;

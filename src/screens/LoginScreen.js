@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, StatusBar, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, StatusBar, ActivityIndicator } from 'react-native';
 import { colors } from '../constants/theme';
 import { login, logout } from '../services/auth';
 import { checkAdminAccess } from '../services/firestore';
+import { showAlert } from '../utils/alert';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
 
   const handleLogin = async (mode) => {
     if (!email || !password) {
-      Alert.alert('Missing details', 'Please enter email and password to continue.');
+      showAlert('Missing details', 'Please enter email and password to continue.');
       return;
     }
 
@@ -22,7 +24,7 @@ export default function LoginScreen({ navigation }) {
         const isAdmin = await checkAdminAccess(user.email);
         if (!isAdmin) {
           await logout();
-          Alert.alert('Access denied', 'This account is not registered as an admin.');
+          showAlert('Access denied', 'This account is not registered as an admin.');
           return;
         }
         navigation.reset({ index: 0, routes: [{ name: 'AdminDashboard' }] });
@@ -30,7 +32,7 @@ export default function LoginScreen({ navigation }) {
       }
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (error) {
-      Alert.alert('Login failed', error.message);
+      showAlert('Login failed', error.message);
     } finally {
       setLoading(false);
     }
@@ -49,14 +51,18 @@ export default function LoginScreen({ navigation }) {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
-          style={styles.input}
+          onFocus={() => setFocusedField('email')}
+          onBlur={() => setFocusedField(null)}
+          style={[styles.input, focusedField === 'email' && styles.inputFocused]}
         />
         <TextInput
           placeholder="Password"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          style={styles.input}
+          onFocus={() => setFocusedField('password')}
+          onBlur={() => setFocusedField(null)}
+          style={[styles.input, focusedField === 'password' && styles.inputFocused]}
         />
 
         <View style={styles.loginButtons}>
@@ -115,6 +121,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     backgroundColor: colors.overlay,
     color: colors.text,
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+    backgroundColor: '#fff',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
   },
   loginButtons: {
     flexDirection: 'row',

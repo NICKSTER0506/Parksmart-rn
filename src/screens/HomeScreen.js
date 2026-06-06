@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { colors } from '../constants/theme';
 import StatCard from '../components/StatCard';
 import ActionCard from '../components/ActionCard';
 import PredictionCard from '../components/PredictionCard';
 import { getCurrentUser } from '../services/auth';
-import { getUserById, subscribeToSlotsRealtime, checkAdminAccess } from '../services/firestore';
+import { getUserById, subscribeToComplexesRealtime, checkAdminAccess } from '../services/firestore';
+import * as Location from 'expo-location';
+import { calculateDistance, formatDistance, getDrivingDistances } from '../utils/distance';
 
 const getTrafficPrediction = () => {
   const hour = new Date().getHours();
@@ -36,12 +38,14 @@ const getTrafficPrediction = () => {
 export default function HomeScreen({ navigation }) {
   const [userName, setUserName] = useState('Driver');
   const [loading, setLoading] = useState(true);
-  const [slots, setSlots] = useState([]);
+  const [complexes, setComplexes] = useState([]);
   const [availableCount, setAvailableCount] = useState(0);
   const [bookedCount, setBookedCount] = useState(0);
+  const [totalSlots, setTotalSlots] = useState(0);
   const [nearbyAreas, setNearbyAreas] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [prediction, setPrediction] = useState(getTrafficPrediction());
+  const [userLocation, setUserLocation] = useState(null);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -54,31 +58,96 @@ export default function HomeScreen({ navigation }) {
       setIsAdmin(adminAccess);
     }
 
+    async function loadLocation() {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+
+      let location = await Location.getLastKnownPositionAsync({});
+      if (!location) {
+        location = await Location.getCurrentPositionAsync({});
+      }
+
+      setUserLocation({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+    }
+
     loadUser();
+    loadLocation();
 
-    const unsubscribe = subscribeToSlotsRealtime((slotData) => {
-      setSlots(slotData);
+    const unsubscribe = subscribeToComplexesRealtime((complexData) => {
+      setComplexes(complexData);
       setLoading(false);
-      const available = slotData.filter((item) => item.status === 'available').length;
-      const occupied = slotData.filter((item) => item.status !== 'available').length;
-      setAvailableCount(available);
-      setBookedCount(occupied);
-
-      const areaMap = slotData.reduce((acc, slot) => {
-        const area = slot.parkingArea || 'City Center';
-        if (!acc[area]) {
-          acc[area] = { area, count: 0, available: 0 };
-        }
-        acc[area].count += 1;
-        if (slot.status === 'available') acc[area].available += 1;
-        return acc;
-      }, {});
-
-      setNearbyAreas(Object.values(areaMap).slice(0, 2));
     });
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    let avail = 0;
+    let occup = 0;
+    let total = 0;
+
+    complexes.forEach((complex) => {
+      avail += complex.availableCount;
+      occup += complex.occupiedCount + complex.reservedCount;
+      total += complex.totalSlots;
+    });
+
+    setAvailableCount(avail);
+    setBookedCount(occup);
+    setTotalSlots(total);
+
+    async function processAreas() {
+      if (!userLocation || complexes.length === 0) {
+        setNearbyAreas(complexes.map(c => ({...c, distanceStr: null, distanceVal: Infinity})));
+        return;
+      }
+
+      // 1. Immediately show Haversine distance so the UI never appears empty
+      let initialAreas = complexes.map((complex) => {
+        let distanceStr = null;
+        let distanceVal = Infinity;
+        if (complex.lat && complex.lng) {
+          distanceVal = calculateDistance(userLocation.latitude, userLocation.longitude, complex.lat, complex.lng);
+          distanceStr = formatDistance(distanceVal);
+        }
+        return { ...complex, distanceStr, distanceVal };
+      });
+      initialAreas.sort((a, b) => a.distanceVal - b.distanceVal);
+      setNearbyAreas([...initialAreas]);
+
+      // 2. Fetch driving distances asynchronously and update
+      const validDestinations = complexes.filter(c => c.lat && c.lng).map(c => ({ lat: c.lat, lng: c.lng, id: c.id }));
+      if (validDestinations.length > 0) {
+        try {
+          const distanceResults = await getDrivingDistances(userLocation, validDestinations);
+          if (!isMounted) return;
+
+          const updatedAreas = initialAreas.map((complex) => {
+            const distData = distanceResults[complex.id];
+            if (distData && distData.distanceStr) {
+              return { ...complex, ...distData };
+            }
+            return complex;
+          });
+
+          updatedAreas.sort((a, b) => a.distanceVal - b.distanceVal);
+          setNearbyAreas(updatedAreas);
+        } catch (e) {
+          console.warn('Failed to update with driving distances', e);
+        }
+      }
+    }
+
+    processAreas();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [complexes, userLocation]);
 
   if (loading) {
     return (
@@ -103,34 +172,44 @@ export default function HomeScreen({ navigation }) {
       </View>
 
       <View style={styles.statRow}>
-        <StatCard label="Total slots" value={slots.length.toString()} accent={colors.primary} />
+        <StatCard label="Total slots" value={totalSlots.toString()} accent={colors.primary} />
         <StatCard label="Areas" value={nearbyAreas.length.toString()} accent={colors.secondaryText} />
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.actionRow}>
-          <ActionCard title="Book Slot" subtitle="Reserve parking now" onPress={() => navigation.navigate('Booking')} color="#E8F8F0" />
-          <ActionCard title="History" subtitle="View your bookings" onPress={() => navigation.navigate('History')} color="#FEF4E6" />
+          <ActionCard title="Book Slot" subtitle="Reserve parking now" onPress={() => navigation.navigate('Slots')} color="#E8F8F0" />
+          <ActionCard title="View Map" subtitle="See live parking spots" onPress={() => navigation.navigate('Map')} color="#E3F2FD" />
         </View>
         <View style={styles.actionRow}>
+          <ActionCard title="History" subtitle="View your bookings" onPress={() => navigation.navigate('Bookings')} color="#FEF4E6" />
           <ActionCard title="Profile" subtitle="Manage your account" onPress={() => navigation.navigate('Profile')} color="#F3F7FF" />
-          {isAdmin && (
-            <ActionCard title="Admin" subtitle="Manage slots and bookings" onPress={() => navigation.navigate('AdminDashboard')} color="#F9F5FF" />
-          )}
+        </View>
+        <View style={styles.actionRow}>
+          <ActionCard title="Admin Panel" subtitle="Manage parking spots & users" onPress={() => navigation.navigate('AdminDashboard')} color="#F9F5FF" />
         </View>
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Nearby parking</Text>
-        <View style={styles.nearbyRow}>
+        <View style={[styles.nearbyRow, { flexWrap: 'wrap' }]}>
           {nearbyAreas.length > 0 ? (
-            nearbyAreas.map((spot) => (
-              <View key={spot.area} style={styles.smallCard}>
-                <Text style={styles.smallTitle}>{spot.area}</Text>
-                <Text style={styles.smallText}>{spot.count} slots</Text>
-                <Text style={styles.smallText}>{spot.available} available</Text>
-              </View>
+            nearbyAreas.map((complex) => (
+              <Pressable 
+                key={complex.id} 
+                style={[styles.smallCard, { marginBottom: 16 }]}
+                onPress={() => navigation.navigate('ComplexOverview', { complex })}
+              >
+                <Text style={styles.smallTitle}>{complex.name}</Text>
+                <Text style={styles.smallText}>{complex.totalSlots} slots</Text>
+                <Text style={styles.smallText}>{complex.availableCount} available</Text>
+                {complex.distanceStr && (
+                  <Text style={[styles.smallText, { color: colors.primary, fontWeight: '600', marginTop: 4 }]}>
+                    {complex.distanceStr} away
+                  </Text>
+                )}
+              </Pressable>
             ))
           ) : (
             <View style={styles.smallCard}>
